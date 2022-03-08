@@ -13,7 +13,9 @@ else
 OPTIFLAG = -march=native
 endif
 
-CFLAGS = -fPIC -std=c99 -O3 $(OPTIFLAG) -Wall -Wextra -Wshadow -Wno-implicit-function-declaration -Wno-incompatible-pointer-types
+CC = gcc
+# -fPIC 
+CFLAGS = -s -std=c99 -O3 $(OPTIFLAG) -Wall -Wextra -Wshadow -Wno-implicit-function-declaration -Wno-incompatible-pointer-types
 
 EXECUTABLES=rng
 

@@ -1,6 +1,6 @@
 #include <stdlib.h>
 #include <stdio.h>
-#include <stdint.h>
+#include <inttypes.h>
 #include <math.h>
 #include <string.h>
 #include <assert.h>
@@ -24,41 +24,14 @@
 #include "wyrand.h"
 #include "trivium32.h"
 #include "trivium64.h"
+#include "stc64.h"
+#include "romutrio.h"
 
 
 #ifndef __x86_64__
 #warning "Expecting an x64 processor."
 #endif
 
-typedef uint32_t (*rand32fnc)(void);
-typedef uint64_t (*rand64fnc)(void);
-#define NUMBEROF32 9
-rand32fnc our32[NUMBEROF32] = {trivium32, xorshift_k4,   xorshift_k5, mersennetwister,
-                               mitchellmoore, widynski, xorshift32,  pcg32,
-                               rand};
-const char *our32name[NUMBEROF32] = {
-    "trivium", "xorshift_k4",   "xorshift_k5", "mersennetwister",
-    "mitchellmoore", "widynski", "xorshift32",  "pcg32",
-    "rand"};
-
-#define NUMBEROF64 12
-rand64fnc our64[NUMBEROF64] = {trivium64, aesdragontamer, aesctr,           lehmer64,   xorshift128plus,
-                               xoroshiro128plus, splitmix64, pcg64, xorshift1024star, xorshift1024plus, wyhash64, wyrand};
-const char *our64name[NUMBEROF64] = {"trivium64", "aesdragontamer","aesctr",          "lehmer64",
-                                     "xorshift128plus", "xoroshiro128plus",
-                                     "splitmix64",      "pcg64", "xorshift1024star", "xorshift1024plus", "wyhash64", "wyrand"};
-
-void populate32(rand32fnc rand, uint32_t *answer, size_t size) {
-  for (size_t i = size; i != 0; i--) {
-    answer[size - i] = rand();
-  }
-}
-
-void populate64(rand64fnc rand, uint64_t *answer, size_t size) {
-  for (size_t i = size; i != 0; i--) {
-    answer[size - i] = rand();
-  }
-}
 
 #define RDTSC_START(cycles)                                                    \
   do {                                                                         \
@@ -90,54 +63,58 @@ void populate64(rand64fnc rand, uint64_t *answer, size_t size) {
  * test, repeat is the number of times we should repeat and size is the
  * number of operations represented by test.
  */
-#define BEST_TIME(test, testname, pre, repeat, size)                           \
+#define BEST_TIME(test, prec, repeat, size, nbytes)                            \
   do {                                                                         \
-    printf("%-40s: ", testname);                                                  \
+    printf("%-40s: ", #test);                                                  \
     fflush(NULL);                                                              \
+    test##_seed(1234567890123ull);                                             \
     uint64_t cycles_start, cycles_final, cycles_diff;                          \
     uint64_t min_diff = (uint64_t)-1;                                          \
     for (int i = 0; i < repeat; i++) {                                         \
-      pre;                                                                     \
-      __asm volatile("" ::: /* pretend to clobber */ "memory");                \
       RDTSC_START(cycles_start);                                               \
-      test;                                                                    \
+      for (size_t j = 0; j != size; ++j) prec[j] = test();                     \
       RDTSC_FINAL(cycles_final);                                               \
       cycles_diff = (cycles_final - cycles_start);                             \
       if (cycles_diff < min_diff)                                              \
         min_diff = cycles_diff;                                                \
     }                                                                          \
-    uint64_t S = size;                                                         \
+    uint64_t S = size * (nbytes);                                              \
     float cycle_per_op = (min_diff) / (double)S;                               \
-    printf(" %.2f cycles per byte", cycle_per_op);                             \
-    printf("\n");                                                              \
+    printf(" %.2f cycles per byte\n", cycle_per_op);                           \
     fflush(NULL);                                                              \
   } while (0)
 
-void demo(int size) {
-  printf("Generating %d bytes of random numbers \n", size);
-  printf("Time reported in number of cycles per byte.\n");
-  printf("We store values to an array of size = %d kB.\n", size / (1024));
-  int repeat = 500;
-  void *prec = malloc(size);
-  assert(size / 8 * 8 == size);
-  printf("\nWe just generate the random numbers: \n");
-  for (int k = 0; k < NUMBEROF32; k++)
-    BEST_TIME(populate32(our32[k], prec, size / sizeof(uint32_t)), our32name[k],
-              , repeat, size);
-  for (int k = 0; k < NUMBEROF64; k++)
-    BEST_TIME(populate64(our64[k], prec, size / sizeof(uint64_t)), our64name[k],
-              , repeat, size);
+void rand_seed(size_t seed) { srand((unsigned) seed); }
 
+#define BT(test, nbytes) \
+  BEST_TIME(test, prec, repeat, size, nbytes)
+
+void demo(size_t size, int repeat) {
+  printf("Generating %" PRIuMAX " random numbers, %d repititions.\n", size, repeat);
+  printf("Time reported in number of cycles per byte generated by rng.\n");
+  printf("We store values to an array of size = %" PRIuMAX " 64-bit numbers.\n\n", size);
+  uint64_t *prec = malloc(size * sizeof *prec);
+
+  BT(trivium32,4); BT(xorshift_k4,4); BT(xorshift_k5,4); BT(mersennetwister,4);
+  BT(mitchellmoore,4); BT(widynski,4); BT(xorshift32,4); BT(pcg32,4); BT(rand,4);
+  puts("");
+  BT(trivium64,8); BT(aesdragontamer,8); BT(aesctr,8); BT(lehmer64,8); BT(xorshift128plus,8);
+  BT(xoroshiro128plus,8); BT(splitmix64,8); BT(pcg64,8); BT(xorshift1024star,8); BT(xorshift1024plus,8);
+  BT(wyhash64,8); BT(wyrand,8);
+  puts("");
+  BT(sfc64,8); BT(stc64,8); BT(romutrio,8);
+
+  uint64_t sum = 0;
+  for (size_t i=0; i<size; ++i) sum += prec[i];
+  printf("\nSum %" PRIxMAX "\n", sum);
   free(prec);
-  printf("\n");
 }
 
 int main() {
-  printf("\n");
-  printf("We repeat the benchmark more than once. Make sure that you get "
-         "comparable results.\n");
-  demo(4096);
+  enum {N=1000, R=500};
 
-  demo(4096);
-  return 0;
+  demo(N, R);
+  demo(N, R);
+  printf("We execute the benchmark twice. Make sure that you get "
+         "comparable results.\n");
 }
