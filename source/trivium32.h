@@ -56,7 +56,7 @@ static inline uint32_t trivium32(void) {
   return z;
 }
 
-void trivium32_seed(uint64_t seed, uint64_t seq) {
+void trivium32_seed_with_seq(uint64_t seed, uint64_t seq) {
   trivium32_s11 = seed;
   trivium32_s12 = seed >> 32;
   trivium32_s13 = 0;
@@ -70,3 +70,5 @@ void trivium32_seed(uint64_t seed, uint64_t seq) {
   for (int i = 0; i < 36; i++) /* blank rounds */
     trivium32();
 }
+
+void trivium32_seed(uint64_t seed) { trivium32_seed_with_seq(seed, seed|1); }
